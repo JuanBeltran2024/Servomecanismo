@@ -1,8 +1,12 @@
 // Definir variables
 #define Sensor_1 2                  // Pin del encoder motor 1
 #define Sensor_2 3                  // Pin del encoder motro 2
-#define OutputPWM_GPIO_1 8           // Pin de salida PWM para el control motor 1
-#define OutputPWM_GPIO_2 9           // Pin de salida PWM para el control motor 2
+#define OutputPWM_GPIO_1 9          // Pin de salida PWM para el control motor 1
+#define IN_1_1 4  
+#define IN_2_1 5         
+#define OutputPWM_GPIO_2 10           // Pin de salida PWM para el control motor 2
+#define IN_1_2 4  
+#define IN_2_2 5 
 #define pwmRes 12                  // Resolución del PWM (12 bits)
 #define pwmMax 4095                // Valor máximo para el PWM (4095 para 12 bits)
 
@@ -31,12 +35,16 @@ float angulo_1 = 0.0;
 float angulo_2 = 0.0;
 
 // Variables de control del sistema
-float Ref_1 = 20;                // angulo de referencia motor 1
-float Ref_2 = 20;                // angulo de referencia motor 2        
+float Ref_1 = 0;                // angulo de referencia motor 1
+float Ref_1_Fut = 0;
+float Ref_2 = 20;                // angulo de referencia motor 2   
+float Ref_2_Fut = 0 ;    
 float U_t_1 = 0.0;                 // Salida de control motor 1 (PWM)
 float U_t_2 = 0.0;                 // Salida de control motro 2 (PWM)
 unsigned int pwmDuty_1 = 0;        // Ciclo de trabajo del PWM motor 1
+unsigned int pwmDuty_1_1 = 0;
 unsigned int pwmDuty_2 = 0;        // Ciclo de trabajo del PWM motor 2
+unsigned int pwmDuty_2_2 = 0;
 
 // Variables para el controlador PID
 float k_p_1 = 0.3; // proporcional motor 1 
@@ -106,15 +114,35 @@ void calibracion(void) {
           u_p_2 = k_p_2*e_n_2;
           u_n_2 = u_p_2;
 
-     
+        if (Ref_1>Ref_1_Fut){
+        digitalWrite(IN_1_1, LOW);
+        digitalWrite(IN_2_1, HIGH);
         float U_tl_1 = min(max((u_n_1), 0), Uunits); // Control motor 1 saturado
         pwmDuty_1 = int((U_tl_1 / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
         analogWriteADJ(OutputPWM_GPIO_1, pwmDuty_1); // Escribir el valor de PWM en el pin
+        } else {
+        digitalWrite(IN_1_1, HIGH);
+        digitalWrite(IN_2_1, LOW);
+        float U_tl_1 = min(max((u_n_1), 0), Uunits); // Control motor 1 saturado
+        pwmDuty_1 = int((U_tl_1 / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
+        analogWriteADJ(OutputPWM_GPIO_1, pwmDuty_1); // Escribir el valor de PWM en el pin
+        }
 
+
+        if (Ref_2>Ref_2_Fut){
+        digitalWrite(IN_1_2, HIGH);
+        digitalWrite(IN_2_2, LOW);
         float U_tl_2 = min(max((u_n_2), 0), Uunits); // Control motor 2 saturado
         pwmDuty_2 = int((U_tl_2 / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
         analogWriteADJ(OutputPWM_GPIO_2, pwmDuty_2); // Escribir el valor de PWM en el pin
-
+        }else {
+        digitalWrite(IN_1_2, LOW);
+        digitalWrite(IN_1_2, HIGH);
+        float U_tl_2 = min(max((u_n_2), 0), Uunits); // Control motor 2 saturado
+        pwmDuty_2 = int((U_tl_2 / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
+        analogWriteADJ(OutputPWM_GPIO_2, pwmDuty_2); // Escribir el valor de PWM en el pin
+        }
+        
            e_n_1_1 = e_n_1;
            e_n_2_1 = e_n_2;
                 
@@ -226,7 +254,11 @@ void setup() {
     
     // Configuración de entrada analógica
     pinMode(Sensor_1, INPUT_PULLUP); // Configurar el pin del encoder_1 como entrada
-     pinMode(Sensor_2, INPUT_PULLUP); // Configurar el pin del Encoder_2 como entrada
+    pinMode(Sensor_2, INPUT_PULLUP); // Configurar el pin del Encoder_2 como entrada
+    pinMode(IN_1_1, OUTPUT); 
+    pinMode(IN_2_1, OUTPUT); 
+    pinMode(IN_1_2, OUTPUT); 
+    pinMode(IN_2_2, OUTPUT); 
 
        // Elige flanco
   if (COUNT_ON_FALL_1) {
