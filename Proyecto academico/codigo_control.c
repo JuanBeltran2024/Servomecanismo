@@ -1,12 +1,6 @@
 // Definir variables
-#define Sensor_1 2                  // Pin del encoder motor 1
-#define Sensor_2 3                  // Pin del encoder motro 2
-#define OutputPWM_GPIO_1 9          // Pin de salida PWM para el control motor 1
-#define IN_1_1 4  
-#define IN_2_1 5         
-#define OutputPWM_GPIO_2 10           // Pin de salida PWM para el control motor 2
-#define IN_1_2 7                     // Pin dirección motor 2 (corregido)
-#define IN_2_2 8                     // Pin dirección motor 2 (corregido) 
+#define Sensor 3                 // Pin del sensor analógico
+#define OutputPWM_GPIO 9           // Pin de salida PWM para el control de la hélice
 #define pwmRes 12                  // Resolución del PWM (12 bits)
 #define pwmMax 4095                // Valor máximo para el PWM (4095 para 12 bits)
 
@@ -17,85 +11,98 @@
 unsigned long pTime = 0;
 unsigned long dTime = 0;
 long previousMillis = 0;          // Para la función del bucle principal
-long Ts = 1000;                   // Tiempo de muestreo en ms
+long Ts = 1;                   // Tiempo de muestreo en ms
 long previousMillis2 = 0;         // Para funciones auxiliares
 bool up = true;
 int i = 0;
-float ts = 0.010;
 
-// Protocolo Serial (formato compatible con Python)
-char lineBuf[64];
-uint8_t lineLen = 0;
+// Advanced Serial Input Variables
+const byte numChars = 32;
+char receivedChars[numChars];
+boolean newData = false;
 
 // Variables de medición
-float encoder_1 = 0.0;         // Valor leído del sensor analógico
-float encoder_2 = 0.0;   
-float angulo_1 = 0.0;          // Ángulo motor 1 en grados
-float angulo_2 = 0.0;          // Ángulo motor 2 en grados
-float angulo_1_rad = 0.0;      // Ángulo motor 1 en radianes
-float angulo_2_rad = 0.0;      // Ángulo motor 2 en radianes
-
-// Offsets de cero (en ranuras)
-volatile int32_t slotOffset_1 = 0;
-volatile int32_t slotOffset_2 = 0;
+float sensorValue = 0.0;         // Valor leído del sensor analógico
+float angulo = 0.0;
 
 // Variables de control del sistema
-float Ref_1 = 0;                // angulo de referencia motor 1 (radianes)
-float Ref_1_Fut = 0;
-float Ref_2 = 0;                 // angulo de referencia motor 2 (radianes)   
-float Ref_2_Fut = 0 ;    
-float U_t_1 = 0.0;                 // Salida de control motor 1 (PWM)
-float U_t_2 = 0.0;                 // Salida de control motro 2 (PWM)
-unsigned int pwmDuty_1 = 0;        // Ciclo de trabajo del PWM motor 1
-unsigned int pwmDuty_1_1 = 0;
-unsigned int pwmDuty_2 = 0;        // Ciclo de trabajo del PWM motor 2
-unsigned int pwmDuty_2_2 = 0;
+float Ref = 30;                // angulo de referencia        
+float U_t = 0.0;                 // Salida de control (PWM)
+unsigned int pwmDuty = 0;        // Ciclo de trabajo del PWM
 
-// Objetivos de trayectoria y parámetros de discretización (2° por paso)
-float target_1 = 0.0f;             // objetivo final motor 1 (rad)
-float target_2 = 0.0f;             // objetivo final motor 2 (rad)
-const float STEP_DEG = 2.0f;       // resolución encoder en grados
-const float STEP_RAD = STEP_DEG * (PI / 180.0f); // tamaño de paso en rad
-const uint32_t TRAJ_MS = 50;       // periodo de actualización de trayectoria (ms)
-uint32_t lastTraj = 0;             // última actualización de trayectoria
 
-// Variables para el controlador PID
-float k_p_1 = 0.3; // proporcional motor 1 
-float k_p_2 = 0.3; // Proporcional motor 2  
-float e_n_1 = 0.0, e_n_1_1 = 0.0; //error control motor 1
-float e_n_2 = 0.0, e_n_2_1 = 0.0; //error control motor 2
-float u_n_1 = 0.0 , u_p_1 = 0.0, u_n_1_1 = 0.0; // motor 1
-float u_n_2 = 0.0 , u_p_2 = 0.0, u_n_2_1 = 0.0; // motor 2
+// Variables para el controlador PD
+float k_p = 0.5;    
+float k_i = 1;
+float k_d = 0.005;
+int N = 100;
+float e_n = 0.0, e_n_1 = 0.0;
+float u_n = 0.0 , u_p = 0.0, u_i = 0.0, u_d = 0.0,  u_n_1_i = 0.0, u_n_1_d = 0.0, u_n_1 = 0.0;
+float ts = 0.0010;
 
-// Variables de control
-unsigned long pwmStartTime = 0;   // Variable para el tiempo de inicio del PWM constante
-unsigned long pwmDuration = 40000; // Duración del PWM constante en milisegundos (3 segundos en este caso)
-bool pwmConstant = true;    
 
-// Variables medida sensor
-const uint16_t SLOTS_PER_REV_1  = 180;      // # de ranuras por vuelta
-const uint16_t SLOTS_PER_REV_2  = 180;
-const bool     COUNT_ON_FALL_1  = true;     // true: cuenta flanco FALLING; false: RISING
-const bool     COUNT_ON_FALL_2  = true; 
-const uint32_t PRINT_EVERY_MS = 100;      // período de impresión
+//Variables sentido de giro motor
+const uint8_t PIN_IN1 = 4;  // Dirección fija
+const uint8_t PIN_IN2 = 5;  // Dirección fija
+bool sentidoAdelante = true; // Variable para controlar el sentido actual
 
-volatile uint32_t slotCount_1 = 0;          // ranuras acumuladas (flancos contados)
-volatile uint32_t slotCount_2 = 0;
-volatile uint32_t lastUs_1 = 0;             // para antirruido
-volatile uint32_t lastUs_2 = 0; 
+//Variables medición de angulos - MODO POLLING
+const uint16_t SLOTS_PER_REV  = 180;      // # de ranuras por vuelta
+const bool     COUNT_ON_FALL  = true;     // true: cuenta flanco FALLING; false: RISING
+
+uint32_t slotCount = 0;                   // ranuras acumuladas (flancos contados)
+uint32_t lastUs = 0;                      // para antirruido
 const uint32_t DEBOUNCE_US = 800;         // ignora cambios más rápidos que esto
 
+uint8_t lastState = HIGH;                 // estado anterior del pin (inicia en HIGH por pullup)
 uint32_t lastPrint = 0;
 
-// Telemetría
-const uint32_t TEL_MS = 50;      // Período de telemetría (50 ms = ~20 Hz)
-uint32_t lastTel = 0;
+// Función para leer encoder por polling (reemplaza a la ISR)
+void leerEncoder() {
+  // ===== DETECCIÓN DE FLANCOS POR POLLING =====
+  uint8_t currentState = digitalRead(Sensor);
+  
+  // Detecta cambio de estado
+  if (currentState != lastState) {
+    uint32_t now = micros();
+    
+    // Antirrebote: ignora cambios muy rápidos
+    if (now - lastUs >= DEBOUNCE_US) {
+      // Verifica el tipo de flanco que queremos contar
+      if (COUNT_ON_FALL) {
+        // Flanco descendente: lastState=HIGH, currentState=LOW
+        if (lastState == HIGH && currentState == LOW) {
+          slotCount++;
+          lastUs = now;
+        }
+      } else {
+        // Flanco ascendente: lastState=LOW, currentState=HIGH
+        if (lastState == LOW && currentState == HIGH) {
+          slotCount++;
+          lastUs = now;
+        }
+      }
+    }
+    
+    lastState = currentState;  // Actualiza el estado anterior
+  }
+}
 
-// Función de utilidad para envolver ángulo a [-π, π]
-float wrapToPi(float a) {
-    while (a > PI) a -= 2.0f * PI;
-    while (a <= -PI) a += 2.0f * PI;
-    return a;
+// Función para controlar el sentido del motor
+void controlarSentidoMotor() {
+  if (angulo > 90 && sentidoAdelante) {
+    // Invertir a retroceso (IN1=HIGH, IN2=LOW)
+    digitalWrite(PIN_IN1, HIGH);
+    digitalWrite(PIN_IN2, LOW);
+    sentidoAdelante = false;
+    Serial.println("*** Motor invertido: RETROCESO ***");
+  } else if (angulo <= 90 && !sentidoAdelante) {
+    // Volver a adelante (IN1=LOW, IN2=HIGH)
+    digitalWrite(PIN_IN1, LOW);
+    digitalWrite(PIN_IN2, HIGH);
+    sentidoAdelante = true;
+    Serial.println("*** Motor invertido: ADELANTE ***");
+  }
 }
 
 // Función de calibración
@@ -103,148 +110,66 @@ void calibracion(void) {
     unsigned long currentMillis = millis(); // Actualizar el tiempo actual
     if (currentMillis - previousMillis >= Ts) {
         previousMillis = currentMillis;
-        
-        // Actualizar trayectoria por pasos de 2° (en rad)
-        if (currentMillis - lastTraj >= TRAJ_MS) {
-            lastTraj = currentMillis;
-            // Motor 1
-            float err1 = wrapToPi(target_1 - Ref_1);
-            float step1 = (fabs(err1) >= STEP_RAD) ? (err1 > 0.0f ? STEP_RAD : -STEP_RAD) : err1;
-            Ref_1 = wrapToPi(Ref_1 + step1);
-            // Motor 2
-            float err2 = wrapToPi(target_2 - Ref_2);
-            float step2 = (fabs(err2) >= STEP_RAD) ? (err2 > 0.0f ? STEP_RAD : -STEP_RAD) : err2;
-            Ref_2 = wrapToPi(Ref_2 + step2);
-        }
 
-        // Calcular referencias futuras para decidir sentido de giro
-        {
-            float err1_f = wrapToPi(target_1 - Ref_1);
-            float step1_f = (fabs(err1_f) >= STEP_RAD) ? (err1_f > 0.0f ? STEP_RAD : -STEP_RAD) : err1_f;
-            Ref_1_Fut = wrapToPi(Ref_1 + step1_f);
+        e_n = Ref - angulo;
 
-            float err2_f = wrapToPi(target_2 - Ref_2);
-            float step2_f = (fabs(err2_f) >= STEP_RAD) ? (err2_f > 0.0f ? STEP_RAD : -STEP_RAD) : err2_f;
-            Ref_2_Fut = wrapToPi(Ref_2 + step2_f);
-        }
+        // Leer conteo de ranuras (ya no necesita noInterrupts porque no hay ISR)
+        uint32_t slots = slotCount;
+              
+        // Ángulo absoluto (0.. <360)
+        uint32_t slotsMod = (SLOTS_PER_REV == 0) ? 0 : (slots % SLOTS_PER_REV);
+        float degPerSlot = 360.0f / (float)SLOTS_PER_REV;
 
-        // Convertir referencias de radianes a grados para cálculo de error local
-        float Ref_1_deg = Ref_1 * (180.0 / PI);
-        float Ref_2_deg = Ref_2 * (180.0 / PI);
-        
-        // Error en grados (para mantener compatibilidad con el control actual)
-        e_n_1 = Ref_1_deg - angulo_1;
-        e_n_2 = Ref_2_deg - angulo_2;
+//     
+        angulo = slotsMod * degPerSlot;    
+        // Controlar sentido del motor según el ángulo
+      //  controlarSentidoMotor();
 
-        //ENCODER 1
-         noInterrupts();
-            uint32_t slots_1 = slotCount_1;
-         interrupts();
+          u_p = k_p*e_n;
+          u_i = (k_i*ts*e_n_1) + u_n_1_i;
+          u_d = (k_d*N*e_n) - (k_d*N*e_n_1) - (N*ts*u_n_1_d) + u_n_1_d;
+          u_n = u_p + u_i + u_d;
+     
+        // Ajustar el control según el sentido del motor
+        float U_tl;
+     //   if (sentidoAdelante) {
+            // Sentido adelante: control normal
+            U_tl = min(max(u_n, 0) , Uunits);
+       // } else {
+            // Sentido retroceso: invertir la señal de control
+         //   U_tl = min(max((u_n), 0) + 50, Uunits);
+       // }
+        pwmDuty = int((U_tl / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
+        analogWriteADJ(OutputPWM_GPIO, pwmDuty); // Escribir el valor de PWM en el pin
 
-         // Ángulo absoluto encoder 1 (0.. <360)
-         // Cálculo del ángulo absoluto del encoder 1 a partir de los impulsos (slotCount_1)
-         // 1. Calcula la posición relativa respecto al valor de referencia (offset de cero)
-         int32_t rel_1 = ((int32_t)slots_1 - slotOffset_1);
-
-         // 2. Realiza un módulo para mantener la cuenta de ranuras dentro del rango [0, SLOTS_PER_REV_1)
-         //    Esto asegura que el ángulo mapee correctamente en una vuelta completa, incluso con conteo negativo
-         int32_t mod_1 = (SLOTS_PER_REV_1 == 0) ? 0 : ((rel_1 % (int32_t)SLOTS_PER_REV_1 + (int32_t)SLOTS_PER_REV_1) % (int32_t)SLOTS_PER_REV_1);
-
-         // 3. Convierte el resultado a uint32_t para usarlo en el cálculo de ángulo
-         uint32_t slotsMod_1 = (uint32_t)mod_1;
-
-         // 4. Calcula los grados que representa cada ranura
-         float degPerSlot_1 = 360.0 / (float)SLOTS_PER_REV_1;
-
-         // 5. Calcula el ángulo absoluto (en grados) dentro de una vuelta [0, 360)
-         angulo_1 = slotsMod_1 * degPerSlot_1;
-
-         // 6. Calcula el ángulo "extendido" (en radianes, para telemetría), permitiendo vueltas múltiples
-         //    Se normaliza entre -pi y pi usando wrapToPi, útil para control y visualización continua
-         float turns_1 = (float)rel_1 / (float)SLOTS_PER_REV_1;
-         angulo_1_rad = wrapToPi(turns_1 * (2.0f * PI));
-
-         noInterrupts();
-            uint32_t slots_2 = slotCount_2;
-         interrupts();
-
-         // Ángulo absoluto encoder 2 (0.. <360)
-         int32_t rel_2 = ((int32_t)slots_2 - slotOffset_2);
-         // Manejar módulo con signo correctamente
-         int32_t mod_2 = (SLOTS_PER_REV_2 == 0) ? 0 : ((rel_2 % (int32_t)SLOTS_PER_REV_2 + (int32_t)SLOTS_PER_REV_2) % (int32_t)SLOTS_PER_REV_2);
-         uint32_t slotsMod_2 = (uint32_t)mod_2;
-         float degPerSlot_2 = 360.0 / (float)SLOTS_PER_REV_2;
-         angulo_2 = slotsMod_2 * degPerSlot_2;
-         // Ángulo en radianes (para telemetría)
-         float turns_2 = (float)rel_2 / (float)SLOTS_PER_REV_2;
-         angulo_2_rad = wrapToPi(turns_2 * (2.0f * PI));
-
-        
-          u_p_1 = k_p_1*e_n_1;
-          u_n_1 = u_p_1;
-
-          u_p_2 = k_p_2*e_n_2;
-          u_n_2 = u_p_2;
-
-        if (Ref_1>Ref_1_Fut){
-        digitalWrite(IN_1_1, LOW);
-        digitalWrite(IN_2_1, HIGH);
-        float U_tl_1 = min(max((u_n_1), 0), Uunits); // Control motor 1 saturado
-        pwmDuty_1 = int((U_tl_1 / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
-        analogWriteADJ(OutputPWM_GPIO_1, pwmDuty_1); // Escribir el valor de PWM en el pin
-        } else {
-        digitalWrite(IN_1_1, HIGH);
-        digitalWrite(IN_2_1, LOW);
-        float U_tl_1 = min(max((u_n_1), 0), Uunits); // Control motor 1 saturado
-        pwmDuty_1 = int((U_tl_1 / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
-        analogWriteADJ(OutputPWM_GPIO_1, pwmDuty_1); // Escribir el valor de PWM en el pin
-        }
-
-
-        if (Ref_2>Ref_2_Fut){
-        digitalWrite(IN_1_2, HIGH);
-        digitalWrite(IN_2_2, LOW);
-        float U_tl_2 = min(max((u_n_2), 0), Uunits); // Control motor 2 saturado
-        pwmDuty_2 = int((U_tl_2 / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
-        analogWriteADJ(OutputPWM_GPIO_2, pwmDuty_2); // Escribir el valor de PWM en el pin
-        }else {
-        digitalWrite(IN_1_2, LOW);
-        digitalWrite(IN_2_2, HIGH);  // Corregido: era IN_1_2 dos veces
-        float U_tl_2 = min(max((u_n_2), 0), Uunits); // Control motor 2 saturado
-        pwmDuty_2 = int((U_tl_2 / Uunits) * pwmMax); // Convertir a ciclo de trabajo PWM
-        analogWriteADJ(OutputPWM_GPIO_2, pwmDuty_2); // Escribir el valor de PWM en el pin
-        }
-        
-           e_n_1_1 = e_n_1;
-           e_n_2_1 = e_n_2;
-        
-        // Calcular esfuerzos normalizados [-1, 1] para telemetría
-        float u1_norm = clampf(u_n_1 / Uunits, -1.0f, 1.0f);
-        float u2_norm = clampf(u_n_2 / Uunits, -1.0f, 1.0f);
-        
-        // Telemetría en formato Y,millis,q1,q2,q1_ref,q2_ref,u1,u2,step_deg,traj_ms,steps1_rem,steps2_rem
-        if (currentMillis - lastTel >= TEL_MS) {
-            lastTel = currentMillis;
-            // Pasos restantes hacia el objetivo (en la trayectoria de 2°)
-            uint32_t steps1_rem = (uint32_t)ceil(fabs(wrapToPi(target_1 - Ref_1)) / STEP_RAD);
-            uint32_t steps2_rem = (uint32_t)ceil(fabs(wrapToPi(target_2 - Ref_2)) / STEP_RAD);
-            Serial.print('Y'); Serial.print(',');
-            Serial.print(currentMillis); Serial.print(',');
-            Serial.print(angulo_1_rad, 6); Serial.print(',');
-            Serial.print(angulo_2_rad, 6); Serial.print(',');
-            Serial.print(Ref_1, 6); Serial.print(',');
-            Serial.print(Ref_2, 6); Serial.print(',');
-            Serial.print(u1_norm, 3); Serial.print(',');
-            Serial.print(u2_norm, 3); Serial.print(',');
-            Serial.print(STEP_DEG, 1); Serial.print(',');
-            Serial.print((uint32_t)TRAJ_MS); Serial.print(',');
-            Serial.print(steps1_rem); Serial.print(',');
-            Serial.println(steps2_rem);
-        }
+           e_n_1 = e_n;
+           u_n_1_i = u_i;
+           u_n_1_d = u_d;
+        // Enviar datos al monitor serial
+   
+        Serial.print("Tiempo: ");
+        Serial.print(millis());
+        Serial.print(", ");
+        Serial.print("angulo: ");
+        Serial.print(angulo);
+        Serial.print(", ");
+        Serial.print("PWM: ");
+        Serial.print(((pwmDuty * 100.0) / pwmMax));
+        Serial.print("%");
+        Serial.print(", ");
+        Serial.print("error: ");
+        Serial.print(e_n);
+        Serial.print(", ");
+        Serial.print("U_n: ");
+        Serial.println(u_n);
     }
 
-    // Procesar comandos seriales
-    pollSerial();
+    // Funciones de entrada serial avanzadas
+    recvWithStartEndMarkers();  
+    if (newData == true) {
+        parseData();
+        newData = false;
+    }
 }
 
 // Configuración del PWM
@@ -265,117 +190,82 @@ void analogWriteADJ(uint8_t pin, uint16_t val) {
     }
 }
 
-// Función de utilidad clamp
-static inline float clampf(float x, float a, float b) { 
-    return x < a ? a : (x > b ? b : x); 
-}
+// Funciones avanzadas para la entrada serial
+void recvWithStartEndMarkers() {
+    static boolean recvInProgress = false;
+    static byte ndx = 0;
+    char startMarker = '<'; // La entrada serial debe comenzar con este carácter
+    char endMarker = '>'; // La entrada serial debe terminar con este carácter
+    char rc;
 
-// Protocolo Serial: procesar línea recibida
-void processLine() {
-    lineBuf[lineLen] = '\0';
-    if (lineLen == 0) return;
+    while (Serial.available() > 0 && newData == false) {
+        rc = Serial.read();
 
-    if (lineBuf[0] == 'R') {
-        // R,theta1,theta2 (radianes)
-        float a, b; 
-        if (sscanf(lineBuf, "R,%f,%f", &a, &b) == 2) {
-            noInterrupts(); 
-            target_1 = a;
-            target_2 = b;
-            interrupts();
+        if (recvInProgress == true) {
+            if (rc != endMarker) {
+                receivedChars[ndx] = rc;
+                ndx++;
+                if (ndx >= numChars) {
+                    ndx = numChars - 1;
+                }
+            }
+            else {
+                receivedChars[ndx] = '\0'; // Terminar la cadena
+                recvInProgress = false;
+                ndx = 0;
+                newData = true;
+            }
         }
-    } else if (lineBuf[0] == 'P') {
-        // P,Kp1,Kp2 (ajustar ganancias)
-        float p1, p2; 
-        if (sscanf(lineBuf, "P,%f,%f", &p1, &p2) == 2) {
-            noInterrupts(); 
-            k_p_1 = p1; 
-            k_p_2 = p2; 
-            interrupts();
-        }
-    } else if (lineBuf[0] == 'Z') {
-        // Calibración: tomar conteos actuales como cero (offset)
-        noInterrupts(); 
-        slotOffset_1 = (int32_t)slotCount_1; 
-        slotOffset_2 = (int32_t)slotCount_2; 
-        interrupts();
-    } else if (lineBuf[0] == 'S') {
-        // Stop: detener PWM
-        analogWriteADJ(OutputPWM_GPIO_1, 0);
-        analogWriteADJ(OutputPWM_GPIO_2, 0);
-    }
-}
-
-// Polling de Serial (llamar desde loop)
-void pollSerial() {
-    while (Serial.available()) {
-        char ch = (char)Serial.read();
-        if (ch == '\n' || ch == '\r') {
-            processLine();
-            lineLen = 0;
-        } else {
-            if (lineLen < sizeof(lineBuf) - 1) lineBuf[lineLen++] = ch;
+        else if (rc == startMarker) {
+            recvInProgress = true;
         }
     }
 }
 
-void isrSlot1() {
-  uint32_t now_1 = micros();
-  if (now_1 - lastUs_1 < DEBOUNCE_US) return; // filtro rápido contra rebotes/ruido
-  slotCount_1++;
-  lastUs_1 = now_1;
+// Función para parsear los datos recibidos
+void parseData() {
+    Ref = atof(receivedChars); // Convertir la entrada serial a un valor flotante y actualizar la referencia
 }
-
-void isrSlot2() {
-  uint32_t now_2 = micros();
-  if (now_2 - lastUs_2 < DEBOUNCE_US) return; // filtro rápido contra rebotes/ruido
-  slotCount_2++;
-  lastUs_2 = now_2;
-}
-
-
 
 void setup() {
-    Serial.begin(115200); // Iniciar la comunicación serial a 115200 baudios (compatible con Python)
+    Serial.begin(115200); // Iniciar la comunicación serial a alta velocidad
     
     // Configuración de entrada analógica
-    pinMode(Sensor_1, INPUT_PULLUP); // Configurar el pin del encoder_1 como entrada
-    pinMode(Sensor_2, INPUT_PULLUP); // Configurar el pin del Encoder_2 como entrada
-    pinMode(IN_1_1, OUTPUT); 
-    pinMode(IN_2_1, OUTPUT); 
-    pinMode(IN_1_2, OUTPUT); 
-    pinMode(IN_2_2, OUTPUT); 
+    pinMode(Sensor, INPUT_PULLUP); // Configurar el pin del sensor como entrada
+    pinMode(PIN_IN1, OUTPUT);
+    pinMode(PIN_IN2, OUTPUT);
 
-       // Elige flanco
-  if (COUNT_ON_FALL_1) {
-    attachInterrupt(digitalPinToInterrupt(Sensor_1), isrSlot1, FALLING);
-  } else {
-    attachInterrupt(digitalPinToInterrupt(Sensor_1), isrSlot1, RISING);
-  }
+    // Inicializar sentido del motor: adelante (IN1=LOW, IN2=HIGH)
+    digitalWrite(PIN_IN1, LOW);
+    digitalWrite(PIN_IN2, HIGH);
+    sentidoAdelante = true;
 
-    if (COUNT_ON_FALL_2) {
-    attachInterrupt(digitalPinToInterrupt(Sensor_2), isrSlot2, FALLING);
-  } else {
-    attachInterrupt(digitalPinToInterrupt(Sensor_2), isrSlot2, RISING);
-  }
+    // Lee el estado inicial del pin para el encoder por polling
+    lastState = digitalRead(Sensor);
 
     // Configuración del PWM
     setupPWMadj();
-    analogWriteADJ(OutputPWM_GPIO_1, 0);
-    analogWriteADJ(OutputPWM_GPIO_2, 0);
+    analogWriteADJ(OutputPWM_GPIO, pwmDuty);
 
-    while(!Serial) { ; }  // Esperar conexión serial
-    delay(50);
-    
-    // Calibración inicial (equivalente a comando 'Z')
-    noInterrupts(); 
-    slotOffset_1 = (int32_t)slotCount_1; 
-    slotOffset_2 = (int32_t)slotCount_2; 
-    interrupts();
+    Serial.println(F("Sistema de control PID con encoder OPB800 (POLLING MODE)"));
+    Serial.println(F("180 ranuras -> 2.0 grados/ranura"));
+    Serial.println(F("Inversion automatica de giro al superar 90 grados"));
+    Serial.println(F("Envia <valor> por Serial para cambiar referencia (ej: <90>)\n"));
+
+    delay(5000); // Esperar 5 segundos antes de iniciar el monitor serial
 }
 
-
-
 void loop() {
+    // Leer encoder continuamente (reemplaza a la ISR)
+
+    digitalWrite(PIN_IN1, HIGH);
+    digitalWrite(PIN_IN2, LOW);
+
+    leerEncoder();
+    
+    // El sentido ahora se controla en la función controlarSentidoMotor()
+    // que se llama desde calibracion()
+    
+    // Ejecutar función de control
     calibracion();
 }
